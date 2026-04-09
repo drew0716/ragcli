@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# RAG runtime data (generated per-project, not source code)
+.rag/
+
+# Environment variables / secrets
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing / caching
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# uv
+uv.lock
