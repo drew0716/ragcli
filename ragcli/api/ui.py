@@ -1051,8 +1051,32 @@ function renderMd(t){if(!t)return'';let h=t;
   // Mermaid blocks: ```mermaid ... ```
   h=h.replace(/```mermaid\n([\s\S]*?)```/g,(_,code)=>{
     const id='mermaid-'+Date.now()+Math.random().toString(36).slice(2,6);
-    setTimeout(()=>{try{mermaid.init(undefined,document.getElementById(id))}catch(e){}},100);
-    return '<div class="mermaid" id="'+id+'">'+code.trim()+'</div>';
+    // Sanitize mermaid code: fix common LLM issues
+    let clean=code.trim();
+    // Unescape HTML entities that we escaped above
+    clean=clean.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>');
+    // Wrap node labels containing special chars in quotes
+    // Match: A[label with (parens) or special chars] and fix to A["label with (parens)"]
+    clean=clean.replace(/(\w+)\[([^\]"]*[()\/&,#:;].*?)\]/g,(_,node,label)=>node+'["'+label.replace(/"/g,"'")+'"]');
+    // Same for (round nodes)
+    clean=clean.replace(/(\w+)\(([^)"]*[[\]\/&,#:;].*?)\)/g,(_,node,label)=>node+'("'+label.replace(/"/g,"'")+'")');
+    // Remove any ** bold markers the LLM might include
+    clean=clean.replace(/\*\*/g,'');
+    setTimeout(()=>{
+      const el=document.getElementById(id);
+      if(!el)return;
+      try{
+        mermaid.render(id+'-svg',clean).then(({svg})=>{
+          el.innerHTML=svg;
+        }).catch(()=>{
+          // Fallback: show as styled text instead of error
+          el.innerHTML='<pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--Rs);padding:.75rem;font-size:.8rem;color:var(--text2);white-space:pre-wrap">'+esc(clean)+'</pre>';
+        });
+      }catch(e){
+        el.innerHTML='<pre style="background:var(--bg);border:1px solid var(--border);border-radius:var(--Rs);padding:.75rem;font-size:.8rem;color:var(--text2);white-space:pre-wrap">'+esc(clean)+'</pre>';
+      }
+    },100);
+    return '<div id="'+id+'" style="margin:.5rem 0;text-align:center"></div>';
   });
 
   // Chart blocks: ```chart {...json} ```
@@ -1111,13 +1135,15 @@ function renderMd(t){if(!t)return'';let h=t;
   // Paragraphs
   h=h.split(/\n\n+/).map(b=>{b=b.trim();if(!b)return'';if(/^<(h[1-6]|ul|ol|li|pre|blockquote|hr|table|div|canvas)/.test(b))return b;return'<p>'+b.replace(/\n/g,'<br>')+'</p>'}).join('\n');
 
-  // Auto-detect tables with numeric data and add visualize button
+  // Auto-detect tables with chartable numeric data (costs/amounts, not dates/IDs)
   h=h.replace(/(<table>[\s\S]*?<\/table>)/g,(table)=>{
-    // Check if table has numbers (costs, amounts, etc.)
-    const nums=table.match(/[\$\£\€][\d,.]+|\d+\.\d{2}|\b\d{2,}\b/g);
-    if(nums&&nums.length>=2){
+    // Must have dollar/currency amounts — not just any numbers
+    const moneyMatches=table.match(/[\$\£\€]\s*[\d,.]+/g);
+    // Or at least a column header suggesting numbers (Cost, Amount, Price, Total, Budget)
+    const numHeaders=/(?:cost|amount|price|total|budget|expense|fee|rate|salary|revenue)/i.test(table);
+    if((moneyMatches&&moneyMatches.length>=2)||numHeaders){
       const cid='auto-chart-'+(chartCounter++);
-      return table+'<div style="margin:.4rem 0"><button class="col-btn" onclick="chartFromTable(this.parentElement.previousElementSibling,\''+cid+'\')" style="font-size:.72rem">\ud83d\udcca Visualize</button><canvas id="'+cid+'" style="display:none;max-width:450px;margin-top:.4rem" height="220"></canvas></div>';
+      return table+'<div style="margin:.4rem 0"><button class="col-btn" onclick="chartFromTable(this.parentElement.previousElementSibling,\''+cid+'\')" style="font-size:.72rem">\ud83d\udcca Visualize</button><canvas id="'+cid+'" style="display:none;max-width:500px;margin-top:.4rem" height="250"></canvas></div>';
     }
     return table;
   });
@@ -1135,50 +1161,85 @@ function chartFromTable(tableEl,canvasId){
   tableEl.querySelectorAll('thead th').forEach(th=>headers.push(th.textContent.trim()));
   tableEl.querySelectorAll('tbody tr').forEach(tr=>{
     const cells=[];tr.querySelectorAll('td').forEach(td=>cells.push(td.textContent.trim()));
-    rows.push(cells);
+    if(cells.length)rows.push(cells);
   });
-
   if(!headers.length||!rows.length)return;
 
-  // Find the label column (first) and numeric column(s)
-  const labels=rows.map(r=>r[0]||'');
-  let numColIdx=-1;
-  for(let c=1;c<headers.length;c++){
-    const hasNums=rows.filter(r=>/[\d.]+/.test(r[c].replace(/[\$\£\€,]/g,''))).length;
-    if(hasNums>=rows.length*0.5){numColIdx=c;break}
-  }
-  if(numColIdx<0)return;
-
-  const values=rows.map(r=>{
-    const v=r[numColIdx].replace(/[\$\£\€,\s]/g,'');
-    return parseFloat(v)||0;
+  // Filter out rows that are section headers or totals (no numeric data or summary rows)
+  const dataRows=rows.filter(r=>{
+    const nums=r.slice(1).filter(c=>/[\d.]/.test(c.replace(/[\$\£\€,]/g,'')));
+    return nums.length>0;
   });
+  if(!dataRows.length)return;
 
-  // Choose chart type: pie for <=6 items, bar for more
-  const chartType=labels.length<=6?'doughnut':'bar';
+  const labels=dataRows.map(r=>r[0]||'');
+  const parseNum=s=>parseFloat((s||'').replace(/[\$\£\€,\s]/g,''))||0;
+
+  // Find ALL numeric columns
+  const numCols=[];
+  for(let c=1;c<headers.length;c++){
+    const numCount=dataRows.filter(r=>parseNum(r[c])!==0).length;
+    if(numCount>=dataRows.length*0.3)numCols.push(c);
+  }
+  if(!numCols.length)return;
 
   const colors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
+  const isComparison=numCols.length>=2;
+  const isFewItems=dataRows.length<=6&&!isComparison;
+
+  // Build datasets
+  const datasets=[];
+  if(isComparison){
+    // Multi-column: grouped bar chart (e.g., Jeff/Drew vs Lori/Pam)
+    numCols.forEach((col,i)=>{
+      datasets.push({
+        label:headers[col]||'Series '+(i+1),
+        data:dataRows.map(r=>parseNum(r[col])),
+        backgroundColor:colors[i%colors.length],
+        borderColor:colors[i%colors.length],
+        borderWidth:1,
+      });
+    });
+  }else{
+    // Single numeric column
+    const col=numCols[0];
+    datasets.push({
+      label:headers[col]||'Value',
+      data:dataRows.map(r=>parseNum(r[col])),
+      backgroundColor:isFewItems?colors.slice(0,dataRows.length):colors[0],
+      borderColor:isFewItems?'rgba(0,0,0,0.2)':colors[0],
+      borderWidth:1,
+    });
+  }
+
+  const chartType=isFewItems?'doughnut':'bar';
 
   canvas.style.display='block';
+  canvas.height=isComparison?Math.max(250,dataRows.length*20+100):220;
+
+  // Destroy existing chart if re-clicking
+  const existing=Chart.getChart(canvas);
+  if(existing)existing.destroy();
+
   new Chart(canvas,{
     type:chartType,
-    data:{
-      labels:labels,
-      datasets:[{
-        label:headers[numColIdx]||'Value',
-        data:values,
-        backgroundColor:chartType==='doughnut'?colors.slice(0,labels.length):colors[0],
-        borderColor:chartType==='doughnut'?'rgba(0,0,0,0.2)':colors[0],
-        borderWidth:1,
-      }]
-    },
+    data:{labels,datasets},
     options:{
       responsive:true,
+      indexAxis:isComparison&&dataRows.length>5?'y':'x',
       plugins:{
-        legend:{display:chartType==='doughnut',position:'right',labels:{color:'#94a3b8',font:{size:11}}},
+        legend:{display:isComparison||isFewItems,position:isFewItems?'right':'top',labels:{color:'#94a3b8',font:{size:11}}},
         title:{display:false},
+        tooltip:{callbacks:{label:ctx=>{
+          let val=ctx.parsed.y??ctx.parsed;
+          if(typeof val==='object')val=val.y||val.x||0;
+          return ctx.dataset.label+': $'+val.toLocaleString();
+        }}},
       },
-      scales:chartType==='bar'?{y:{beginAtZero:true,ticks:{color:'#94a3b8'}},x:{ticks:{color:'#94a3b8'}}}:undefined,
+      scales:chartType!=='doughnut'?{
+        y:{beginAtZero:true,ticks:{color:'#94a3b8',callback:v=>'$'+v.toLocaleString()}},
+        x:{ticks:{color:'#94a3b8',maxRotation:45}},
+      }:undefined,
     }
   });
 }

@@ -22,6 +22,9 @@ RULES:
 5. In your answer, cite sources with **bold** key facts and use markdown formatting.
 6. If information is missing, say so explicitly.
 7. Output ONE tool call per response as a JSON object on its own line.
+8. IMPORTANT: You CAN generate charts and diagrams. When asked for a chart or visual, output data as a markdown table (the UI auto-generates charts from tables). NEVER say "I cannot create visuals".
+9. For numerical breakdowns, ALWAYS use a markdown table — not a numbered list.
+10. For flowcharts or routes, output a Mermaid diagram with node labels in quotes.
 
 Collection info:
 {collection_info}

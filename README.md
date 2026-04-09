@@ -18,9 +18,10 @@ Turn any folder of documents into a queryable AI -- from the command line or a b
 - **Anti-hallucination prompts** -- strict source attribution rules prevent the LLM from mixing up or inventing information
 
 ### Visualization
-- **Auto-charts** -- tables with numeric data get a "Visualize" button that generates bar/doughnut charts instantly
-- **Chart.js support** -- the LLM can output chart blocks for pie charts, bar charts, line graphs, and doughnut charts
-- **Mermaid diagrams** -- flowcharts, timelines, gantt charts render inline
+- **Auto-charts** -- cost/financial tables get a "Visualize" button: doughnut for single-series, grouped bar for comparisons
+- **Comparison charts** -- multi-column tables (e.g., Person A vs Person B costs) auto-generate grouped bar charts
+- **Flowcharts** -- ask for a "route", "flowchart", or "process diagram" and get an interactive Mermaid visualization
+- **Smart detection** -- charts only appear on tables with currency/financial data, not on date/itinerary tables
 - **Rich markdown** -- tables, bold, links, code blocks, blockquotes all render properly
 
 ### Data Management
@@ -246,20 +247,38 @@ When agentic mode is enabled, complex questions use an **agent with tools**:
 
 ## Visualization
 
+ragcli auto-generates visuals from LLM responses -- no manual chart configuration needed.
+
 ### Auto-charts from tables
 
-Any table with numeric data (costs, amounts, counts) automatically gets a **Visualize** button. Click it to generate a chart:
-- 6 or fewer items: doughnut chart
-- More items: bar chart
-- Colors auto-assigned
+Tables containing financial data (dollar amounts, costs, prices) automatically get a **Visualize** button. Click it to generate a chart:
 
-### LLM-generated charts
+- **Single column of numbers** (e.g., cost breakdown): doughnut chart for 6 or fewer items, bar chart for more
+- **Multiple numeric columns** (e.g., Jeff vs Pam costs): grouped comparison bar chart with each person as a separate colored series
+- **Smart detection**: only appears on tables with currency amounts or cost-related headers -- not on itinerary or timeline tables that just have dates
 
-Ask for a "pie chart" or "bar chart" and the LLM outputs both a table and a Chart.js visualization inline. Supported types: pie, bar, line, doughnut.
+Charts include $ formatting, legends for multi-series data, and responsive sizing.
 
-### Mermaid diagrams
+### Flowcharts and route diagrams (Mermaid)
 
-The LLM can output Mermaid blocks for flowcharts, timelines, and gantt charts that render inline in the chat.
+Ask for a "flowchart", "route map", "travel route", or "process diagram" and the LLM generates a Mermaid diagram that renders as an interactive visual:
+
+```
+"Can you generate a visual flowchart of the travel route?"
+→ Renders a left-to-right flow diagram: RSW → JFK → Tokyo → Osaka → Kyoto → ...
+```
+
+Supports: flowcharts (`graph LR`/`graph TD`), sequence diagrams, gantt charts, and timelines.
+
+### What triggers what
+
+| You ask for... | LLM outputs | UI renders |
+|----------------|-------------|------------|
+| Cost breakdown, comparison | Markdown table with $ amounts | Table + Visualize button (bar/doughnut chart) |
+| Group comparison (A vs B) | Multi-column table | Table + grouped bar chart |
+| Flowchart, route, journey | Mermaid `graph` block | Interactive flow diagram |
+| Timeline, schedule | Mermaid `gantt` or table | Visual timeline or table |
+| Itinerary, dates | Table with dates | Clean table (no chart -- dates aren't chartable) |
 
 ---
 

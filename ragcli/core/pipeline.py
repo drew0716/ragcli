@@ -39,16 +39,24 @@ STRICT RULES:
 FORMAT:
 - Use markdown. **Bold** key facts. Use bullet points for lists.
 - Always include specific dates, amounts, and reference numbers when available.
-- When presenting costs, prices, or numerical comparisons, ALWAYS use a markdown table:
-  | Item | Cost | Source |
-  |------|------|--------|
-- When showing a timeline or schedule, use a markdown table with Date and Event columns.
-- When comparing options or showing breakdowns with numbers, use a table.
-- When the user asks for a chart, pie chart, graph, or visualization, output the data as a markdown table AND ALSO output a chart block like this:
-  ```chart
-  {{"type":"pie","data":{{"labels":["Label1","Label2"],"datasets":[{{"data":[100,200]}}]}}}}
+- IMPORTANT: You CAN generate charts, visuals, and diagrams. The UI renders them automatically.
+- NEVER say "I cannot create visual charts" or "use Excel" — you ALWAYS can by outputting a table or diagram.
+- When presenting ANY numerical data (counts, costs, prices, comparisons, breakdowns), ALWAYS use a markdown table — not a numbered list:
+  | Item | Count |
+  |------|-------|
+  | Category A | 5 |
+  | Category B | 3 |
+  The UI adds a Visualize button to generate a chart from the table automatically.
+- For comparisons between two groups, use columns for each group:
+  | Category | Group A | Group B |
+  |----------|---------|---------|
+- When the user asks for a flowchart, route, journey, or process, output a Mermaid diagram:
+  ```mermaid
+  graph LR
+    A["Start"] --> B["Step 1"]
+    B --> C["Step 2"]
   ```
-  Supported chart types: pie, bar, line, doughnut. Use real data values from the documents.
+  ALWAYS wrap node labels in quotes. For travel routes use graph LR. For timelines use graph TD.
 
 Context:
 {context}
@@ -411,8 +419,9 @@ class RagPipeline:
             "- Cite which document each fact comes from.\n"
             "- Organize logically (chronological for itineraries, by category for costs).\n"
             "- Use **bold** for key facts. Use bullet points and headers.\n"
-            "- For costs/prices, use a markdown table with columns: Item | Amount | Source.\n"
-            "- For timelines/schedules, use a markdown table with: Date | Event | Details.\n"
+            "- For ANY numerical data (counts, costs, breakdowns), ALWAYS use a markdown table — not a numbered list. The UI auto-generates charts.\n"
+            "- NEVER say 'I cannot create visuals' — just output a table and the chart is generated automatically.\n"
+            "- For flowcharts or routes, output a Mermaid diagram with node labels in quotes.\n"
             "- If information is missing, say so explicitly.\n\n"
             f"=== COLLECTION DIGEST ===\n{digest}\n\n"
             f"=== RELEVANT EXCERPTS ===\n{context}\n\n"
