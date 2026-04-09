@@ -463,7 +463,7 @@ async function loadCollections(el){
         const upWrap=document.createElement('div');
         upWrap.style.cssText='margin:-.2rem 0 .75rem;padding:.6rem;border:1px solid var(--border);border-top:none;border-radius:0 0 var(--Rs) var(--Rs);background:var(--bg)';
         upWrap.innerHTML='<div style="font-size:.75rem;color:var(--text3);margin-bottom:.4rem">Upload files to <b>'+esc(col.name)+'</b></div>'+
-          '<div class="upload-zone" id="upZone" style="padding:1rem"><h4 style="font-size:.85rem">Drop files here or click to browse</h4><p>PDF, DOCX, PPTX, MD, TXT, HTML, CSV</p><input type="file" id="upFile" multiple accept=".pdf,.docx,.pptx,.md,.txt,.html,.csv"></div>'+
+          '<div class="upload-zone" id="upZone" style="padding:1rem"><h4 style="font-size:.85rem">Drop files here or click to browse</h4><p>PDF, DOCX, PPTX, XLSX, MD, TXT, HTML, CSV</p><input type="file" id="upFile" multiple accept=".pdf,.docx,.pptx,.xlsx,.xls,.md,.txt,.html,.csv"></div>'+
           '<div class="upload-progress" id="upProg"></div>';
         el.appendChild(upWrap);
         setTimeout(()=>{

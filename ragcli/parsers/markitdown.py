@@ -8,10 +8,10 @@ from ragcli.parsers.base import BaseParser, ParseError
 class MarkItDownParser(BaseParser):
     """
     Wraps Microsoft's MarkItDown to convert any document to markdown.
-    Supported: PDF, DOCX, PPTX, HTML, CSV, TXT, MD
+    Supported: PDF, DOCX, PPTX, XLSX, XLS, HTML, CSV, TXT, MD
     """
 
-    EXTENSIONS = {".pdf", ".docx", ".pptx", ".html", ".csv", ".txt", ".md"}
+    EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".html", ".csv", ".txt", ".md"}
 
     def __init__(self) -> None:
         from markitdown import MarkItDown

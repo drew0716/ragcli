@@ -585,6 +585,7 @@ Open **Collections** in the sidebar:
 | PDF | `.pdf` |
 | Word | `.docx` |
 | PowerPoint | `.pptx` |
+| Excel | `.xlsx`, `.xls` |
 | Markdown | `.md` |
 | Plain text | `.txt` |
 | HTML | `.html` |

@@ -17,6 +17,8 @@ EXTENSION_LABELS = {
     ".pdf": "PDF",
     ".docx": "DOCX",
     ".pptx": "PPTX",
+    ".xlsx": "Excel",
+    ".xls": "Excel",
     ".md": "Markdown",
     ".txt": "Text",
     ".html": "HTML",

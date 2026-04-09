@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ragcli.core.models import ManifestEntry
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".md", ".txt", ".html", ".csv"}
+SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".pptx", ".xlsx", ".xls", ".md", ".txt", ".html", ".csv"}
 
 
 class ManifestManager:
