@@ -1110,8 +1110,79 @@ function renderMd(t){if(!t)return'';let h=t;
   h=h.replace(/((?:<li>.*<\/li>\n?)+)/g,m=>/^<ul>/.test(m)?m:'<ol>'+m+'</ol>');
   // Paragraphs
   h=h.split(/\n\n+/).map(b=>{b=b.trim();if(!b)return'';if(/^<(h[1-6]|ul|ol|li|pre|blockquote|hr|table|div|canvas)/.test(b))return b;return'<p>'+b.replace(/\n/g,'<br>')+'</p>'}).join('\n');
+
+  // Auto-detect tables with numeric data and add visualize button
+  h=h.replace(/(<table>[\s\S]*?<\/table>)/g,(table)=>{
+    // Check if table has numbers (costs, amounts, etc.)
+    const nums=table.match(/[\$\£\€][\d,.]+|\d+\.\d{2}|\b\d{2,}\b/g);
+    if(nums&&nums.length>=2){
+      const cid='auto-chart-'+(chartCounter++);
+      return table+'<div style="margin:.4rem 0"><button class="col-btn" onclick="chartFromTable(this.parentElement.previousElementSibling,\''+cid+'\')" style="font-size:.72rem">\ud83d\udcca Visualize</button><canvas id="'+cid+'" style="display:none;max-width:450px;margin-top:.4rem" height="220"></canvas></div>';
+    }
+    return table;
+  });
+
   return h;
 }
+
+// Auto-generate chart from table data
+function chartFromTable(tableEl,canvasId){
+  if(!tableEl||!tableEl.querySelector)return;
+  const canvas=document.getElementById(canvasId);
+  if(!canvas)return;
+
+  const headers=[];const rows=[];
+  tableEl.querySelectorAll('thead th').forEach(th=>headers.push(th.textContent.trim()));
+  tableEl.querySelectorAll('tbody tr').forEach(tr=>{
+    const cells=[];tr.querySelectorAll('td').forEach(td=>cells.push(td.textContent.trim()));
+    rows.push(cells);
+  });
+
+  if(!headers.length||!rows.length)return;
+
+  // Find the label column (first) and numeric column(s)
+  const labels=rows.map(r=>r[0]||'');
+  let numColIdx=-1;
+  for(let c=1;c<headers.length;c++){
+    const hasNums=rows.filter(r=>/[\d.]+/.test(r[c].replace(/[\$\£\€,]/g,''))).length;
+    if(hasNums>=rows.length*0.5){numColIdx=c;break}
+  }
+  if(numColIdx<0)return;
+
+  const values=rows.map(r=>{
+    const v=r[numColIdx].replace(/[\$\£\€,\s]/g,'');
+    return parseFloat(v)||0;
+  });
+
+  // Choose chart type: pie for <=6 items, bar for more
+  const chartType=labels.length<=6?'doughnut':'bar';
+
+  const colors=['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1'];
+
+  canvas.style.display='block';
+  new Chart(canvas,{
+    type:chartType,
+    data:{
+      labels:labels,
+      datasets:[{
+        label:headers[numColIdx]||'Value',
+        data:values,
+        backgroundColor:chartType==='doughnut'?colors.slice(0,labels.length):colors[0],
+        borderColor:chartType==='doughnut'?'rgba(0,0,0,0.2)':colors[0],
+        borderWidth:1,
+      }]
+    },
+    options:{
+      responsive:true,
+      plugins:{
+        legend:{display:chartType==='doughnut',position:'right',labels:{color:'#94a3b8',font:{size:11}}},
+        title:{display:false},
+      },
+      scales:chartType==='bar'?{y:{beginAtZero:true,ticks:{color:'#94a3b8'}},x:{ticks:{color:'#94a3b8'}}}:undefined,
+    }
+  });
+}
+
 function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML}
 
 // Init

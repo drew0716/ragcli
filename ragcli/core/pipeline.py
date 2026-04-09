@@ -39,11 +39,16 @@ STRICT RULES:
 FORMAT:
 - Use markdown. **Bold** key facts. Use bullet points for lists.
 - Always include specific dates, amounts, and reference numbers when available.
-- When presenting costs, prices, or numerical comparisons, use a markdown table:
+- When presenting costs, prices, or numerical comparisons, ALWAYS use a markdown table:
   | Item | Cost | Source |
   |------|------|--------|
 - When showing a timeline or schedule, use a markdown table with Date and Event columns.
 - When comparing options or showing breakdowns with numbers, use a table.
+- When the user asks for a chart, pie chart, graph, or visualization, output the data as a markdown table AND ALSO output a chart block like this:
+  ```chart
+  {{"type":"pie","data":{{"labels":["Label1","Label2"],"datasets":[{{"data":[100,200]}}]}}}}
+  ```
+  Supported chart types: pie, bar, line, doughnut. Use real data values from the documents.
 
 Context:
 {context}
