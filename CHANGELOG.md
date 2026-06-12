@@ -3,7 +3,9 @@
 All notable changes to this project are documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/); versioning follows [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-06-11
+
+First public release.
 
 ### Security
 - Confined all API filesystem access (`/browse`, `/upload`, `/ingest`, collection creation) to the project directory.
@@ -23,6 +25,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/); versioning follo
 ### Added
 - `ragcli` console script (alias of `rag`), `py.typed`, CI workflow, LICENSE.
 - Optional dependency extras: `local`, `formats`, `pdf`, `all`.
-
-## [0.1.0]
-- Initial release.
