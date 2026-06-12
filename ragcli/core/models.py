@@ -69,6 +69,13 @@ class QueryResult(BaseModel):
     meta: QueryMeta = Field(default_factory=QueryMeta)
 
 
+class IngestError(BaseModel):
+    """A per-file error encountered during ingest."""
+
+    file: str
+    message: str
+
+
 class IngestResult(BaseModel):
     """Summary of an ingest operation."""
 
@@ -78,6 +85,7 @@ class IngestResult(BaseModel):
     total_chunks: int
     duration_seconds: float
     summaries: dict[str, str] = Field(default_factory=dict)
+    errors: list[IngestError] = Field(default_factory=list)
 
 
 class EvalScore(BaseModel):

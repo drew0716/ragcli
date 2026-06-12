@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from ragcli.core.config import RagConfig
+from ragcli.core.generator import BaseGenerator
 from ragcli.core.pipeline import RagPipeline
 from ragcli.manifest.manager import ManifestManager
 from ragcli.stores.chroma import ChromaStore
@@ -20,10 +21,11 @@ class FakeEmbedder:
         return [float(len(query) % 10) / 10.0] * 384
 
 
-class FakeGenerator:
+class FakeGenerator(BaseGenerator):
     """Fake generator that returns a canned answer."""
 
     def generate(self, prompt: str) -> tuple[str, int]:
+        self.total_tokens += 100
         return "The answer is 42.", 100
 
 

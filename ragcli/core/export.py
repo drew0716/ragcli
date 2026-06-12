@@ -51,5 +51,5 @@ def save_export(
         output_path = export_dir / f"session_{timestamp}.md"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content)
+    output_path.write_text(content, encoding="utf-8")
     return output_path

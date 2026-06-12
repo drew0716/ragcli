@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ragcli.core.models import ManifestEntry
-from ragcli.manifest.manager import ManifestManager
+from ragcli.manifest.manager import ManifestManager, manifest_key
 
 
 @pytest.fixture
@@ -77,15 +77,17 @@ def test_unchanged_file_not_in_diff(manager: ManifestManager, docs: Path) -> Non
 
 
 def test_manifest_saves_and_loads_correctly(manager: ManifestManager) -> None:
-    entry = _make_entry("/tmp/test.md", "abc123", chunks=10)
-    manifest = {"/tmp/test.md": entry}
+    # Keys are normalized to resolved absolute paths on load.
+    key = manifest_key("/tmp/test.md")
+    entry = _make_entry(key, "abc123", chunks=10)
+    manifest = {key: entry}
 
     manager.save(manifest)
     loaded = manager.load()
 
-    assert "/tmp/test.md" in loaded
-    assert loaded["/tmp/test.md"].hash == "abc123"
-    assert loaded["/tmp/test.md"].chunks == 10
+    assert key in loaded
+    assert loaded[key].hash == "abc123"
+    assert loaded[key].chunks == 10
 
 
 def test_hash_differs_when_content_changes(manager: ManifestManager, docs: Path) -> None:

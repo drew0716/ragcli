@@ -1,11 +1,13 @@
 """LLM response generation."""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+
+from pydantic import BaseModel
 
 from ragcli.core.config import RagConfig
+from ragcli.core.errors import RagError
 
-# Pricing per 1M tokens (input, output) — approximate as of 2025
+# Pricing per 1M tokens (input, output) — fallback when litellm has no price data
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4o": (2.50, 10.00),
@@ -17,8 +19,9 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 }
 
 
-@dataclass
-class GenerationResult:
+class GenerationResult(BaseModel):
+    """A single LLM generation with usage and cost accounting."""
+
     text: str
     tokens_used: int = 0
     prompt_tokens: int = 0
@@ -27,11 +30,44 @@ class GenerationResult:
     model: str = ""
 
 
-class BaseGenerator(ABC):
-    """Abstract base class for LLM generators."""
+def _friendly_llm_error(provider: str, exc: Exception) -> RagError | None:
+    """Map a raw provider/litellm exception to a human-readable RagError."""
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
 
-    total_cost: float = 0.0
-    total_tokens: int = 0
+    if "api key" in msg or "authentication" in msg or "unauthorized" in msg or "auth" in name:
+        return RagError(
+            f"{provider.title()} API key is missing or invalid. "
+            "Add it in Settings > API Keys, or set it in .env"
+        )
+    if "ratelimit" in name or "rate limit" in msg or "429" in msg:
+        return RagError(
+            f"{provider.title()} rate limit hit. Wait a moment and retry, "
+            "or switch to a different model in Settings."
+        )
+    if "timeout" in name or "timed out" in msg or "timeout" in msg:
+        return RagError(
+            f"The {provider} request timed out. The model may be overloaded — retry, "
+            "or increase [llm].timeout_seconds in rag.config.toml."
+        )
+    if "connection" in name or "connection" in msg or "refused" in msg or "resolve" in msg:
+        return RagError(
+            f"Could not connect to {provider}. Check your network connection"
+            + (" and that Ollama is running ('ollama serve')." if provider == "ollama" else ".")
+        )
+    return None
+
+
+class BaseGenerator(ABC):
+    """Abstract base class for LLM generators.
+
+    Implementations must maintain ``total_cost`` (USD) and ``total_tokens``
+    across calls — the pipeline reads them for per-query cost reporting.
+    """
+
+    def __init__(self) -> None:
+        self.total_cost: float = 0.0
+        self.total_tokens: int = 0
 
     @abstractmethod
     def generate(self, prompt: str) -> tuple[str, int]:
@@ -47,23 +83,32 @@ class LocalGenerator(BaseGenerator):
     """Uses Ollama via LiteLLM for local LLM generation."""
 
     def __init__(self, model: str = "llama3.2", temperature: float = 0.1,
-                 max_tokens: int = 1024, ollama_host: str = "http://localhost:11434") -> None:
+                 max_tokens: int = 1024, ollama_host: str = "http://localhost:11434",
+                 timeout_seconds: float = 120.0) -> None:
+        super().__init__()
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.ollama_host = ollama_host
+        self.timeout_seconds = timeout_seconds
 
     def generate(self, prompt: str) -> tuple[str, int]:
         import litellm
 
-        litellm.api_base = self.ollama_host
-        response = litellm.completion(
-            model=f"ollama/{self.model}",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            api_base=self.ollama_host,
-        )
+        try:
+            response = litellm.completion(
+                model=f"ollama/{self.model}",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                api_base=self.ollama_host,
+                timeout=self.timeout_seconds,
+            )
+        except Exception as e:
+            friendly = _friendly_llm_error("ollama", e)
+            if friendly:
+                raise friendly from e
+            raise
         text = response.choices[0].message.content or ""
         tokens = response.usage.total_tokens if response.usage else 0
         self.total_tokens += tokens
@@ -78,26 +123,31 @@ class CloudGenerator(BaseGenerator):
     """Uses LiteLLM for cloud LLM providers (OpenAI, Anthropic)."""
 
     def __init__(self, provider: str, model: str, temperature: float = 0.1,
-                 max_tokens: int = 1024, api_key: str | None = None) -> None:
+                 max_tokens: int = 1024, api_key: str | None = None,
+                 timeout_seconds: float = 120.0) -> None:
+        super().__init__()
         self.provider = provider
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.total_cost = 0.0
-
-        # Ensure API key is in environment for litellm
-        if api_key:
-            import os
-            if provider == "openai":
-                os.environ["OPENAI_API_KEY"] = api_key
-            elif provider == "anthropic":
-                os.environ["ANTHROPIC_API_KEY"] = api_key
-            elif provider == "cohere":
-                os.environ["COHERE_API_KEY"] = api_key
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
 
     def generate(self, prompt: str) -> tuple[str, int]:
         result = self.generate_with_cost(prompt)
         return result.text, result.tokens_used
+
+    def _compute_cost(self, response: object, prompt_tokens: int, completion_tokens: int) -> float:
+        try:
+            import litellm
+
+            cost = litellm.completion_cost(completion_response=response)
+            if cost:
+                return float(cost)
+        except Exception:
+            pass
+        pricing = MODEL_PRICING.get(self.model, (0.0, 0.0))
+        return (prompt_tokens * pricing[0] + completion_tokens * pricing[1]) / 1_000_000
 
     def generate_with_cost(self, prompt: str) -> GenerationResult:
         import litellm
@@ -112,14 +162,13 @@ class CloudGenerator(BaseGenerator):
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
+                api_key=self.api_key,
+                timeout=self.timeout_seconds,
             )
         except Exception as e:
-            msg = str(e).lower()
-            if "api key" in msg or "authentication" in msg or "unauthorized" in msg:
-                raise RuntimeError(
-                    f"{self.provider.title()} API key is missing or invalid. "
-                    f"Add it in Settings > API Keys, or set it in .env"
-                ) from e
+            friendly = _friendly_llm_error(self.provider, e)
+            if friendly:
+                raise friendly from e
             raise
         text = response.choices[0].message.content or ""
         usage = response.usage
@@ -127,10 +176,7 @@ class CloudGenerator(BaseGenerator):
         prompt_tokens = usage.prompt_tokens if usage else 0
         completion_tokens = usage.completion_tokens if usage else 0
 
-        # Calculate cost
-        pricing = MODEL_PRICING.get(self.model, (0, 0))
-        cost = (prompt_tokens * pricing[0] + completion_tokens * pricing[1]) / 1_000_000
-
+        cost = self._compute_cost(response, prompt_tokens, completion_tokens)
         self.total_cost += cost
         self.total_tokens += total_tokens
 
@@ -153,6 +199,7 @@ def get_generator(config: RagConfig) -> BaseGenerator:
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
             ollama_host=config.ollama_host,
+            timeout_seconds=config.llm.timeout_seconds,
         )
     elif provider in ("openai", "anthropic"):
         # Get the API key from config (loaded from .env)
@@ -162,6 +209,7 @@ def get_generator(config: RagConfig) -> BaseGenerator:
         # Also try loading from .env directly if pydantic didn't pick it up
         if not api_key:
             import os
+
             from dotenv import load_dotenv
             load_dotenv()
             env_map = {"openai": "OPENAI_API_KEY", "anthropic": "ANTHROPIC_API_KEY"}
@@ -173,6 +221,7 @@ def get_generator(config: RagConfig) -> BaseGenerator:
             temperature=config.llm.temperature,
             max_tokens=config.llm.max_tokens,
             api_key=api_key,
+            timeout_seconds=config.llm.timeout_seconds,
         )
     else:
         raise ValueError(f"Unknown LLM provider: {provider}")

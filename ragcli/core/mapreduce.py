@@ -3,6 +3,8 @@
 from pathlib import Path
 from typing import Optional
 
+from ragcli.core.errors import RagError
+
 MAP_PROMPT = """Extract ONLY factual information from these documents that DIRECTLY answers the question.
 
 RULES:
@@ -71,8 +73,11 @@ def map_reduce_query(
     # Map phase: extract relevant info from each batch
     extractions: list[str] = []
     all_sources: set[str] = set()
+    errors: list[str] = []
+    batches = 0
 
     for i in range(0, len(all_chunks), batch_size):
+        batches += 1
         batch = all_chunks[i : i + batch_size]
         batch_content = ""
         for chunk in batch:
@@ -85,8 +90,13 @@ def map_reduce_query(
             response, _ = generator.generate(prompt)
             if response.strip() and "no relevant information" not in response.lower():
                 extractions.append(response.strip())
-        except Exception:
-            continue
+        except Exception as e:
+            errors.append(str(e))
+
+    # Every batch failed: surface the real problem (e.g. bad API key) instead
+    # of pretending nothing was found.
+    if errors and len(errors) == batches:
+        raise RagError(f"All LLM calls failed during map-reduce: {errors[-1]}")
 
     if not extractions:
         return "I couldn't find relevant information across the documents.", list(all_sources)
@@ -127,8 +137,11 @@ def build_collection_summary(
 
     # Map phase: summarize batches
     partial_summaries: list[str] = []
+    errors: list[str] = []
+    batches = 0
 
     for i in range(0, len(representative_chunks), batch_size):
+        batches += 1
         batch = representative_chunks[i : i + batch_size]
         batch_content = ""
         for chunk in batch:
@@ -140,8 +153,11 @@ def build_collection_summary(
             response, _ = generator.generate(prompt)
             if response.strip():
                 partial_summaries.append(response.strip())
-        except Exception:
-            continue
+        except Exception as e:
+            errors.append(str(e))
+
+    if errors and len(errors) == batches:
+        raise RagError(f"All LLM calls failed while summarizing the collection: {errors[-1]}")
 
     if not partial_summaries:
         return None

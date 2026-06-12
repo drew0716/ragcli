@@ -1,9 +1,11 @@
 """ChromaDB vector store implementation."""
 
 from pathlib import Path
+from typing import Optional
 
 import chromadb
 
+from ragcli.core.errors import RagError
 from ragcli.core.models import DocumentChunk
 from ragcli.stores.base import BaseVectorStore
 
@@ -93,8 +95,17 @@ class ChromaStore(BaseVectorStore):
 
         try:
             results = self._collection.query(**kwargs)
-        except Exception:
-            return []
+        except Exception as e:
+            msg = str(e).lower()
+            if "dimension" in msg:
+                raise RagError(
+                    "Embedding dimension mismatch — the embedding model has changed since "
+                    "this collection was indexed. Re-index with 'rag ingest --force'."
+                ) from e
+            raise RagError(
+                f"Vector store query failed: {e}\n"
+                "If this persists, re-index with 'rag ingest --force'."
+            ) from e
 
         pairs: list[tuple[DocumentChunk, float]] = []
         if not results["ids"] or not results["ids"][0]:
@@ -118,6 +129,43 @@ class ChromaStore(BaseVectorStore):
 
         return pairs
 
+    def _chunks_from_get(self, results: dict) -> list[DocumentChunk]:
+        chunks: list[DocumentChunk] = []
+        for i, doc_id in enumerate(results.get("ids", [])):
+            meta = results["metadatas"][i] if results.get("metadatas") else {}
+            content = results["documents"][i] if results.get("documents") else ""
+            chunks.append(
+                DocumentChunk(
+                    id=doc_id,
+                    content=content,
+                    source_file=meta.get("source_file", ""),
+                    page=meta.get("page") if meta.get("page", -1) != -1 else None,
+                    chunk_index=meta.get("chunk_index", 0),
+                )
+            )
+        return chunks
+
+    def get_by_source(self, filename_substring: str, limit: int = 50) -> list[DocumentChunk]:
+        """Return chunks whose source filename contains the substring (case-insensitive)."""
+        needle = Path(filename_substring).name.lower()
+        # Chroma metadata filters don't support substring matching, so scan and
+        # filter in Python — collections are small enough for this to be cheap.
+        all_chunks = self.get_all()
+        matches = [
+            c for c in all_chunks
+            if needle in Path(c.source_file).name.lower()
+        ]
+        matches.sort(key=lambda c: (c.source_file, c.chunk_index))
+        return matches[:limit]
+
+    def get_all(self, limit: Optional[int] = None) -> list[DocumentChunk]:
+        """Return stored chunks (up to limit), without embeddings."""
+        total = self._collection.count()
+        if total == 0:
+            return []
+        results = self._collection.get(limit=limit or total)
+        return self._chunks_from_get(results)
+
     def count(self) -> int:
         """Total number of chunks in the collection."""
         return self._collection.count()
@@ -132,6 +180,13 @@ class ChromaStore(BaseVectorStore):
     def list_collections(self) -> list[str]:
         """List all collection names."""
         return [c.name for c in self._client.list_collections()]
+
+    def count_collection(self, name: str) -> int:
+        """Chunk count for a named collection without switching the active one."""
+        try:
+            return self._client.get_collection(_sanitize_collection_name(name)).count()
+        except Exception:
+            return 0
 
     def switch_collection(self, name: str) -> None:
         """Switch to a different collection (creates if needed)."""

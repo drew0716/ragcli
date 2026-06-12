@@ -6,6 +6,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from ragcli.core.errors import RagError
+
 
 class CollectionMeta(BaseModel):
     """Metadata for a single collection."""
@@ -26,14 +28,23 @@ class CollectionRegistry:
         """Load all collection metadata."""
         if not self.path.exists():
             return {}
-        data = json.loads(self.path.read_text())
-        return {k: CollectionMeta(**v) for k, v in data.items()}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return {k: CollectionMeta(**v) for k, v in data.items()}
+        except (json.JSONDecodeError, TypeError, ValueError) as e:
+            raise RagError(
+                f"Could not read {self.path}: {e}\n"
+                "The file may be corrupted — delete it and re-create your collections."
+            ) from e
 
     def save(self, registry: dict[str, CollectionMeta]) -> None:
         """Save collection metadata atomically."""
         self.rag_dir.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({k: v.model_dump() for k, v in registry.items()}, indent=2))
+        tmp.write_text(
+            json.dumps({k: v.model_dump() for k, v in registry.items()}, indent=2),
+            encoding="utf-8",
+        )
         tmp.replace(self.path)
 
     def get(self, name: str) -> Optional[CollectionMeta]:

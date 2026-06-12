@@ -1,12 +1,34 @@
-"""Text splitting logic — recursive chunker implementation."""
+"""Text splitting logic — chunker base class and implementations."""
 
 import uuid
+from abc import ABC, abstractmethod
 from typing import Optional
 
 from ragcli.core.models import DocumentChunk
 
 
-class RecursiveChunker:
+class BaseChunker(ABC):
+    """Abstract base class for text chunkers."""
+
+    @abstractmethod
+    def chunk(self, text: str, source_file: str, page: Optional[int] = None) -> list[DocumentChunk]:
+        """Split text into chunks with sequential chunk_index values."""
+
+
+def _make_chunks(contents: list[str], source_file: str, page: Optional[int]) -> list[DocumentChunk]:
+    return [
+        DocumentChunk(
+            id=str(uuid.uuid4()),
+            content=content,
+            source_file=source_file,
+            page=page,
+            chunk_index=i,
+        )
+        for i, content in enumerate(contents)
+    ]
+
+
+class RecursiveChunker(BaseChunker):
     """
     Default chunker. Splits on paragraphs, then sentences, then words.
     Never splits mid-sentence if avoidable.
@@ -25,19 +47,7 @@ class RecursiveChunker:
 
         raw_chunks = self._split_recursive(text, self.SEPARATORS)
         merged = self._merge_chunks(raw_chunks)
-
-        results: list[DocumentChunk] = []
-        for i, content in enumerate(merged):
-            results.append(
-                DocumentChunk(
-                    id=str(uuid.uuid4()),
-                    content=content,
-                    source_file=source_file,
-                    page=page,
-                    chunk_index=i,
-                )
-            )
-        return results
+        return _make_chunks(merged, source_file, page)
 
     def _word_count(self, text: str) -> int:
         return len(text.split())
@@ -115,8 +125,35 @@ class RecursiveChunker:
         return result
 
 
-def get_chunker(strategy: str = "recursive", chunk_size: int = 512, overlap: int = 50) -> RecursiveChunker:
+class FixedChunker(BaseChunker):
+    """Fixed-size chunker: hard word-window splits with overlap, no boundary detection."""
+
+    def __init__(self, chunk_size: int = 512, overlap: int = 50) -> None:
+        self.chunk_size = chunk_size
+        self.overlap = max(0, min(overlap, chunk_size - 1))
+
+    def chunk(self, text: str, source_file: str, page: Optional[int] = None) -> list[DocumentChunk]:
+        if not text.strip():
+            return []
+
+        words = text.split()
+        step = self.chunk_size - self.overlap
+        contents: list[str] = []
+        for i in range(0, len(words), step):
+            piece = " ".join(words[i : i + self.chunk_size]).strip()
+            if piece:
+                contents.append(piece)
+            if i + self.chunk_size >= len(words):
+                break
+        return _make_chunks(contents, source_file, page)
+
+
+def get_chunker(strategy: str = "recursive", chunk_size: int = 512, overlap: int = 50) -> BaseChunker:
     """Factory: returns chunker based on strategy name."""
     if strategy == "recursive":
         return RecursiveChunker(chunk_size=chunk_size, overlap=overlap)
-    raise ValueError(f"Unknown chunking strategy: {strategy}")
+    if strategy == "fixed":
+        return FixedChunker(chunk_size=chunk_size, overlap=overlap)
+    raise ValueError(
+        f"Unknown chunking strategy: {strategy!r}. Supported: 'recursive', 'fixed'."
+    )

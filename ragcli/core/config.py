@@ -1,11 +1,19 @@
 """Pydantic Settings + TOML config loader for ragcli."""
 
+import sys
 from pathlib import Path
 from typing import Optional
 
-import toml
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # pragma: no cover - exercised only on Python 3.10
+    import tomli as tomllib
+
+import tomli_w
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+from ragcli.core.errors import RagError
 
 
 class ProjectConfig(BaseModel):
@@ -37,6 +45,7 @@ class LLMConfig(BaseModel):
     model: str = "llama3.2"
     temperature: float = 0.1
     max_tokens: int = 1024
+    timeout_seconds: float = 120.0
 
 
 class FeaturesConfig(BaseModel):
@@ -47,6 +56,42 @@ class FeaturesConfig(BaseModel):
     watch_mode: bool = True
     query_cache: bool = True
     cache_ttl_seconds: int = 300
+
+
+class QueryTuningConfig(BaseModel):
+    """Tunables for query routing and retrieval scoring."""
+
+    max_history: int = 10
+    agent_max_steps: int = 6
+    # Broad strategy: retrieve max(broad_min_retrieve, total/3) chunks,
+    # then keep the best chunk from up to broad_max_sources files.
+    broad_min_retrieve: int = 30
+    broad_max_sources: int = 15
+    # Retrieval score boosts for the specific strategy.
+    graph_boost: float = 0.15
+    filename_boost: float = 0.10
+    doc_type_boost: float = 0.12
+    # Words/phrases that route a question to the broad or specific strategy.
+    broad_keywords: list[str] = Field(default_factory=lambda: [
+        "all", "every", "everything", "complete", "full", "entire", "overview",
+        "summary", "summarize", "itinerary", "timeline", "schedule", "plan",
+        "list all", "tell me about", "what do i have", "what's planned",
+        "build", "compile", "comprehensive", "total", "breakdown",
+        "how many", "how much total", "across all", "all the",
+    ])
+    specific_keywords: list[str] = Field(default_factory=lambda: [
+        "confirmation", "booking number", "reference", "check-in",
+        "address", "phone", "email", "price of", "cost of",
+        "which hotel", "which flight", "what time",
+    ])
+    # Filename boosting: if the question mentions a keyword, boost files whose
+    # names contain the doc type.
+    doc_type_keywords: dict[str, list[str]] = Field(default_factory=lambda: {
+        "hotel": ["hotel", "booking", "reservation", "stay", "room", "check-in"],
+        "flight": ["flight", "airline", "boarding", "departure", "arrival"],
+        "confirmation": ["confirmation", "booking", "receipt", "order", "ticket"],
+        "cost": ["cost", "price", "paid", "payment", "amount", "total", "invoice"],
+    })
 
 
 class EvalConfig(BaseModel):
@@ -64,6 +109,7 @@ class RagConfig(BaseSettings):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    query: QueryTuningConfig = Field(default_factory=QueryTuningConfig)
     eval: EvalConfig = Field(default_factory=EvalConfig)
 
     # API keys from env
@@ -82,7 +128,14 @@ class RagConfig(BaseSettings):
 
         file_data: dict = {}
         if config_path.exists():
-            file_data = toml.load(config_path)
+            try:
+                with open(config_path, "rb") as f:
+                    file_data = tomllib.load(f)
+            except tomllib.TOMLDecodeError as e:
+                raise RagError(
+                    f"Could not parse {config_path}: {e}\n"
+                    "Fix the TOML syntax, or delete the file and re-run 'rag init'."
+                ) from e
 
         return cls(**file_data)
 
@@ -98,9 +151,10 @@ class RagConfig(BaseSettings):
             "retrieval": self.retrieval.model_dump(),
             "llm": self.llm.model_dump(),
             "features": self.features.model_dump(),
+            "query": self.query.model_dump(),
             "eval": self.eval.model_dump(),
         }
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w") as f:
-            toml.dump(data, f)
+        with open(config_path, "wb") as f:
+            tomli_w.dump(data, f)

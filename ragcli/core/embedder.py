@@ -33,11 +33,21 @@ class LocalEmbedder(BaseEmbedder):
             from rich.console import Console
             from rich.panel import Panel
 
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as e:
+                from ragcli.core.errors import RagError
+
+                raise RagError(
+                    "Local embeddings require the 'local' extra: "
+                    "pip install \"ragcli[local]\"\n"
+                    "Or switch to cloud embeddings in rag.config.toml "
+                    "([embeddings] provider = \"openai\")."
+                ) from e
+
             console = Console(stderr=True)
             with console.status(f"[bold blue]Loading embedding model {self.model_name}..."):
                 try:
-                    from sentence_transformers import SentenceTransformer
-
                     self._model = SentenceTransformer(self.model_name)
                 except Exception as e:
                     msg = str(e).lower()
@@ -70,9 +80,12 @@ class OpenAIEmbedder(BaseEmbedder):
     Model: text-embedding-3-small by default.
     """
 
-    def __init__(self, model: str = "text-embedding-3-small", batch_size: int = 100) -> None:
+    def __init__(self, model: str = "text-embedding-3-small", batch_size: int = 100,
+                 api_key: str | None = None, timeout_seconds: float = 120.0) -> None:
         self.model = model
         self.batch_size = batch_size
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
         self.total_tokens = 0
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -81,7 +94,10 @@ class OpenAIEmbedder(BaseEmbedder):
         all_embeddings: list[list[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            response = litellm.embedding(model=self.model, input=batch)
+            response = litellm.embedding(
+                model=self.model, input=batch,
+                api_key=self.api_key, timeout=self.timeout_seconds,
+            )
             batch_embeddings = [item["embedding"] for item in response.data]
             all_embeddings.extend(batch_embeddings)
             if hasattr(response, "usage") and response.usage:
@@ -95,14 +111,27 @@ class OpenAIEmbedder(BaseEmbedder):
 class CohereEmbedder(BaseEmbedder):
     """Uses LiteLLM for Cohere embeddings."""
 
-    def __init__(self, model: str = "embed-english-v3.0") -> None:
+    # Cohere's embed API caps requests at 96 texts.
+    MAX_BATCH = 96
+
+    def __init__(self, model: str = "embed-english-v3.0", api_key: str | None = None,
+                 timeout_seconds: float = 120.0) -> None:
         self.model = model
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         import litellm
 
-        response = litellm.embedding(model=f"cohere/{self.model}", input=texts)
-        return [item["embedding"] for item in response.data]
+        all_embeddings: list[list[float]] = []
+        for i in range(0, len(texts), self.MAX_BATCH):
+            batch = texts[i : i + self.MAX_BATCH]
+            response = litellm.embedding(
+                model=f"cohere/{self.model}", input=batch,
+                api_key=self.api_key, timeout=self.timeout_seconds,
+            )
+            all_embeddings.extend(item["embedding"] for item in response.data)
+        return all_embeddings
 
     def embed_query(self, query: str) -> list[float]:
         return self.embed([query])[0]
@@ -116,8 +145,14 @@ def get_embedder(config: RagConfig) -> BaseEmbedder:
     if provider == "local":
         return LocalEmbedder(model_name=model)
     elif provider == "openai":
-        return OpenAIEmbedder(model=model, batch_size=config.embeddings.batch_size)
+        return OpenAIEmbedder(
+            model=model, batch_size=config.embeddings.batch_size,
+            api_key=config.openai_api_key, timeout_seconds=config.llm.timeout_seconds,
+        )
     elif provider == "cohere":
-        return CohereEmbedder(model=model)
+        return CohereEmbedder(
+            model=model, api_key=config.cohere_api_key,
+            timeout_seconds=config.llm.timeout_seconds,
+        )
     else:
         raise ValueError(f"Unknown embeddings provider: {provider}")
