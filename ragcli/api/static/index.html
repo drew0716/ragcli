@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ragcli</title>
+<!--
+  Third-party libraries are loaded from jsDelivr with pinned versions and SRI
+  hashes. For fully offline/airgapped use, download these four files into
+  this static/ directory and change the src attributes to local paths.
+-->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js" integrity="sha384-b0GXujLkk9eYYSmcSfoyZbfyElGAQnDyY0skCHSG6w3JgTMFnz11ggrTAr7seu9f" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js" integrity="sha384-R63zfMfSwJF4xCR11wXii+QUsbiBIdiDzDbtxia72oGWfkT7WHJfmD/I/eeHPJyT" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/markdown-it@14.1.0/dist/markdown-it.min.js" integrity="sha384-wLhprpjsmjc/XYIcF+LpMxd8yS1gss6jhevOp6F6zhiIoFK6AmHtm4bGKtehTani" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js" integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-l">
+    <div class="logo"><span>rag</span>cli</div>
+    <span class="dot"></span>
+    <span class="st" id="stText">connecting...</span>
+  </div>
+  <div class="hdr-r">
+    <select class="cs" id="colSel"><option>default</option></select>
+    <button class="pb" data-panel="sources">Sources</button>
+    <button class="pb" data-panel="graph">Knowledge</button>
+    <button class="pb" data-panel="docs">Docs</button>
+    <button class="pb" data-panel="collections">Collections</button>
+    <button class="pb" id="exportBtn">Export</button>
+    <button class="pb" id="clearBtn">Clear</button>
+    <button class="pb" data-panel="settings">Settings</button>
+    <button class="pb" id="thBtn">Light</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <!-- Chat -->
+  <div class="chat-col">
+    <div class="chat-area" id="chatArea">
+      <div class="welcome" id="welcome">
+        <h2>Chat with your documents</h2>
+        <p>Ask anything about your indexed files. Answers cite their sources.</p>
+        <div class="wc-grid" id="wcCards"></div>
+      </div>
+    </div>
+    <div class="input-area">
+      <div class="input-row">
+        <textarea id="qIn" placeholder="Ask a question..." rows="1"></textarea>
+        <button class="send" id="sendBtn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar closed" id="sidebar">
+    <div class="sb-hdr">
+      <h3 id="sbTitle">Sources</h3>
+      <button class="sb-close" id="sbCloseBtn">&times;</button>
+    </div>
+    <div class="sb-body" id="sbBody"></div>
+  </div>
+</div>
+
+<script src="/static/markdown.js"></script>
+<script src="/static/charts.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
