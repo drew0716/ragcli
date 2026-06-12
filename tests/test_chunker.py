@@ -57,3 +57,27 @@ def test_chunk_preserves_source_file() -> None:
     assert chunks[0].source_file == "my/doc.pdf"
     assert chunks[0].chunk_index == 0
     assert chunks[0].id  # UUID should be set
+
+
+def test_fixed_chunker_strategy() -> None:
+    from ragcli.core.chunker import FixedChunker, get_chunker
+
+    chunker = get_chunker("fixed", chunk_size=10, overlap=2)
+    assert isinstance(chunker, FixedChunker)
+
+    text = " ".join(f"word{i}" for i in range(25))
+    chunks = chunker.chunk(text, "test.md")
+    assert len(chunks) >= 3
+    assert all(len(c.content.split()) <= 10 for c in chunks)
+    # Overlap: each subsequent chunk starts with the previous chunk's tail.
+    first_tail = chunks[0].content.split()[-2:]
+    assert chunks[1].content.split()[:2] == first_tail
+
+
+def test_unknown_strategy_raises() -> None:
+    import pytest
+
+    from ragcli.core.chunker import get_chunker
+
+    with pytest.raises(ValueError, match="recursive"):
+        get_chunker("semantic")

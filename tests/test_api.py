@@ -11,9 +11,14 @@ from ragcli.core.models import IngestResult, QueryResult, SourceChunk
 
 
 @pytest.fixture
-def client(tmp_path: Path) -> TestClient:
-    """Create a test client with mocked pipeline."""
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Create a test client with mocked pipeline, isolated to tmp_path."""
     from ragcli.api.server import create_app
+
+    # create_app resolves everything against cwd — keep test artifacts
+    # (.rag/, collections.json) out of the repo.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "docs").mkdir()
 
     with patch("ragcli.api.server.RagConfig") as mock_config_cls, \
          patch("ragcli.api.server.RagPipeline") as mock_pipeline_cls:
