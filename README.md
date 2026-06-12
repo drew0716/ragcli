@@ -62,8 +62,8 @@ Turn any folder of documents into a queryable AI -- from the command line or a b
 |-------------|---------|-------|
 | **Python** | 3.10+ | Check with `python3 --version` |
 | **pip** | any | Use `pip3` on macOS (not `pip`, which may point to Python 2) |
-| **Ollama** *(local mode)* | any | `rag init` will install it for you, or get it from [ollama.com](https://ollama.com) |
-| **API key** *(cloud mode)* | -- | Only if you choose OpenAI or Anthropic; can be added later in Settings |
+| **Ollama** *(local mode)* | any | Install from [ollama.com/download](https://ollama.com/download) (macOS: `brew install ollama`). `rag init` detects it and guides you — it never installs software on your behalf. |
+| **API key** *(cloud mode)* | -- | Only if you choose OpenAI or Anthropic; can be added later in Settings ([how to get one](#getting-api-keys)) |
 
 ### System requirements for local mode
 
@@ -80,11 +80,24 @@ Turn any folder of documents into a queryable AI -- from the command line or a b
 git clone https://github.com/drew0716/ragcli.git
 cd ragcli
 
-# Install (use pip3, not pip, on macOS)
-pip3 install -e .
+# Full local mode (recommended): includes sentence-transformers embeddings
+pip3 install -e ".[local]"
 ```
 
-The `-e` flag installs in editable mode -- changes to the source take effect immediately. After install, the `rag` command is available globally from any directory.
+After install, both the `rag` and `ragcli` commands are available globally from any directory.
+
+### Optional extras
+
+The base install stays small; pick the extras you need:
+
+| Extra | What it adds | Install |
+|-------|--------------|---------|
+| `local` | Local embeddings via sentence-transformers (pulls PyTorch — large) | `pip3 install -e ".[local]"` |
+| `formats` | Extended document formats (audio transcription, YouTube, …) | `pip3 install -e ".[formats]"` |
+| `pdf` | Higher-fidelity PDF parsing (pymupdf4llm) | `pip3 install -e ".[pdf]"` |
+| `all` | Everything above | `pip3 install -e ".[all]"` |
+
+Cloud-only usage (OpenAI embeddings + LLM) works with the base install — no extras needed.
 
 ---
 
@@ -103,13 +116,14 @@ This walks you through setup:
 - Project name
 
 If you choose local mode, `rag init` will:
-- Install Ollama if not present (macOS: via Homebrew; Linux: via install script)
-- Start the Ollama server
-- Pull the LLM model
+- Check whether Ollama is installed and running (and print the exact install
+  command if it isn't — it never runs installers for you)
+- Offer to start the Ollama server and pull the LLM model
 - Download the embedding model (~80 MB)
 - **Auto-ingest** any documents already in the docs folder
 
-For a fully non-interactive setup with defaults:
+For a fully non-interactive setup with defaults (no prompts, no downloads —
+safe for scripts and CI):
 
 ```bash
 rag init --yes
@@ -366,7 +380,7 @@ Ask a question. If no question is given, starts interactive chat mode. Auto-inge
 |--------|-------------|
 | `--top-k INT` | Number of chunks to retrieve (default: 8) |
 | `--no-llm` | Return raw retrieved chunks without LLM generation |
-| `--json` | Output as JSON |
+| `--json` | Output as plain JSON on stdout (pipeable to `jq` etc.) |
 | `--collection TEXT` | Query a specific collection |
 
 ### `rag serve`
@@ -377,14 +391,16 @@ Start the API server with web UI. Auto-ingests on startup and watches for file c
 |--------|-------------|
 | `--port INT` | Port (default: 8000) |
 | `--host TEXT` | Host (default: 127.0.0.1) |
-| `--reload` | Auto-reload on code changes |
+| `--allow-remote` | Required to bind a non-loopback host — see [Security](#security) |
 | `--no-watch` | Disable auto-re-indexing on file changes |
 | `--cors` | Enable CORS for all origins |
 | `--no-browser` | Don't auto-open the browser |
 
 ### `rag eval`
 
-Evaluate RAG quality with auto-generated or custom test questions.
+Evaluate RAG quality with auto-generated or custom test questions. Questions
+whose judge output can't be parsed are reported as *unscored* rather than
+silently given a middle score.
 
 | Option | Description |
 |--------|-------------|
@@ -484,6 +500,7 @@ provider = "local"                   # "local" | "openai" | "anthropic"
 model = "llama3.1:8b"               # see model recommendations below
 temperature = 0.1
 max_tokens = 1024
+timeout_seconds = 120.0
 
 [features]
 agentic_queries = true
@@ -493,6 +510,17 @@ query_cache = true
 auto_ingest = true
 watch_mode = true
 cache_ttl_seconds = 300
+
+[query]
+# Tuning knobs for routing and retrieval scoring — all optional.
+max_history = 10                     # conversation turns kept for follow-ups
+agent_max_steps = 6                  # tool calls per agentic query
+broad_min_retrieve = 30              # chunk pool for broad questions
+broad_max_sources = 15               # max files cited in a broad answer
+graph_boost = 0.15                   # knowledge-graph relevance boost
+filename_boost = 0.10                # filename-keyword match boost
+doc_type_boost = 0.12                # doc-type keyword boost
+# broad_keywords / specific_keywords / doc_type_keywords are also overridable.
 
 [eval]
 faithfulness_threshold = 0.8
@@ -545,10 +573,30 @@ Cloud cost is tracked per-query and per-session in the UI.
 
 ### Getting API keys
 
-- **OpenAI**: Sign up at [platform.openai.com](https://platform.openai.com/signup), then create an API key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- **Anthropic**: Sign up at [console.anthropic.com](https://console.anthropic.com/), then create an API key under Settings > API Keys
+Cloud mode needs an API key from the provider you choose. All three providers
+bill per token used; a typical query costs fractions of a cent on the smaller
+models.
 
-Paste your key into the web Settings panel or add it to `.env`.
+1. **OpenAI** — sign up at [platform.openai.com](https://platform.openai.com/signup),
+   add a payment method under *Settings → Billing*, then create a key at
+   [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+   Keys look like `sk-...`.
+2. **Anthropic** — sign up at [console.anthropic.com](https://console.anthropic.com/),
+   add billing, then create a key under *Settings → API Keys*.
+   Keys look like `sk-ant-...`.
+3. **Cohere** *(optional, embeddings only)* — sign up at
+   [dashboard.cohere.com](https://dashboard.cohere.com/), create a key under
+   *API Keys*.
+
+Then give the key to ragcli in any of these ways:
+
+- **Web UI**: open *Settings → API Keys*, paste it, click Save. It's written
+  to `.env`, applied immediately (no restart), and only ever displayed masked.
+- **`.env` file**: add `OPENAI_API_KEY=sk-...` (or `ANTHROPIC_API_KEY`,
+  `COHERE_API_KEY`) to `.env` in your project directory.
+- **Environment variable**: export it in your shell before running `rag`.
+
+`.env` is listed in `.gitignore` — never commit API keys.
 
 ### Recommendation
 
@@ -560,7 +608,7 @@ Paste your key into the web Settings panel or add it to `.env`.
 - **Start with `llama3.1:8b`** -- free, local, significantly better than llama3.2
 - **Upgrade to cloud** if accuracy is critical (policies, legal, financial docs)
 - **gpt-4o-mini** is the best value -- very accurate at ~$0.01/query
-- Change models anytime from the web Settings panel -- no restart needed for cloud models
+- Change models anytime from the web Settings panel -- changes apply immediately, no restart needed
 
 ---
 
@@ -635,7 +683,7 @@ your-project/
   rag.config.toml          <- configuration (created by rag init)
   .env                     <- API keys (managed via Settings panel)
   .rag/                    <- index data (created automatically)
-    manifest.json          <- tracks which files are indexed
+    manifest.json          <- tracks indexed files (one manifest per collection)
     collections.json       <- collection metadata (name -> folder mapping)
     feeds.json             <- RSS feed configuration
     graphs/                <- per-collection knowledge graphs
@@ -652,6 +700,29 @@ your-project/
 
 ---
 
+## Security
+
+ragcli is designed as a **local, single-user tool**:
+
+- `rag serve` binds `127.0.0.1` by default. The API has **no authentication**,
+  so binding any other host requires an explicit `--allow-remote` flag and
+  prints a warning. If you need network access, put it behind an
+  authenticated reverse proxy or a private network like Tailscale.
+- All filesystem paths accepted by the API (uploads, ingest, the folder
+  browser) are confined to the project directory the server was started in.
+- Uploaded filenames are sanitized and uploads are size-limited (100 MB).
+- RSS feed URLs must be public http(s) endpoints — private, loopback, and
+  cloud-metadata addresses are rejected, and TLS certificates are verified.
+- API keys are stored in `.env` (chmod 600), applied without restart, and
+  only ever displayed masked.
+- The web UI renders LLM/document content through markdown-it + DOMPurify,
+  with Mermaid in strict mode — a malicious document can't inject script
+  into your browser.
+
+Found a vulnerability? See [SECURITY.md](SECURITY.md) for private reporting.
+
+---
+
 ## Troubleshooting
 
 ### "Ollama is not running"
@@ -663,10 +734,27 @@ ollama pull llama3.1:8b
 
 Or re-run `rag init` -- it will set up Ollama for you.
 
+### "Local embeddings require the 'local' extra"
+
+```bash
+pip3 install -e ".[local]"    # installs sentence-transformers (+ PyTorch)
+```
+
+Or switch to cloud embeddings: set `[embeddings] provider = "openai"` in
+`rag.config.toml` and add your API key.
+
 ### PDF or DOCX parsing errors
 
 ```bash
-pip3 install -e .         # reinstall to pick up all dependencies
+pip3 install -e ".[all]"      # reinstall with all parsing extras
+```
+
+### "Embedding dimension mismatch"
+
+You changed the embedding model after indexing. Re-index:
+
+```bash
+rag ingest --force
 ```
 
 ### "pip: command not found" or installs to Python 2
@@ -705,17 +793,20 @@ Open Settings > API Keys and paste your key. It's saved to `.env` automatically.
 ```bash
 git clone https://github.com/drew0716/ragcli.git
 cd ragcli
-pip3 install -e .
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,local]"
 
-# Run tests (22 tests)
-uv run python -m pytest
+# Run tests (hermetic — no network or model downloads needed)
+pytest -q
 
 # Lint
-uv run ruff check . --fix
-
-# Run CLI
-uv run python -m ragcli
+ruff check . --fix
 ```
+
+CI runs `ruff` + `pytest` on Python 3.10–3.13 for every PR. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for code standards and how to add a new
+vector store, embedder, LLM provider, or parser, and
+[CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ### Tech Stack
 
@@ -728,7 +819,8 @@ uv run python -m ragcli
 | Vector store | ChromaDB |
 | Knowledge graph | NetworkX |
 | Charts | Chart.js |
-| Diagrams | Mermaid.js |
+| Diagrams | Mermaid.js (strict mode) |
+| Markdown rendering | markdown-it + DOMPurify |
 | RSS feeds | feedparser |
 | LLM | Ollama (local), LiteLLM (OpenAI, Anthropic) |
 | Config | Pydantic Settings + TOML |
