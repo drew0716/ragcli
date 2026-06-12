@@ -60,8 +60,8 @@ Turn any folder of documents into a queryable AI -- from the command line or a b
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| **Python** | 3.10+ | Check with `python3 --version` |
-| **pip** | any | Use `pip3` on macOS (not `pip`, which may point to Python 2) |
+| **Python** | 3.10+ | Check with `python3 --version`. macOS ships 3.9 — install a newer one via `brew install python` or [python.org](https://www.python.org/downloads/) |
+| **pip** | 21.3+ | Run `pip install --upgrade pip` inside your venv before installing |
 | **Ollama** *(local mode)* | any | Install from [ollama.com/download](https://ollama.com/download) (macOS: `brew install ollama`). `rag init` detects it and guides you — it never installs software on your behalf. |
 | **API key** *(cloud mode)* | -- | Only if you choose OpenAI or Anthropic; can be added later in Settings ([how to get one](#getting-api-keys)) |
 
@@ -75,16 +75,70 @@ Turn any folder of documents into a queryable AI -- from the command line or a b
 
 ## Installation
 
-```bash
-# Clone the repo
-git clone https://github.com/drew0716/ragcli.git
-cd ragcli
+> **macOS users:** the Python that ships with macOS is 3.9 with a 2021-era pip —
+> too old for ragcli (needs 3.10+). Install a current Python first:
+> `brew install python` (or download from [python.org](https://www.python.org/downloads/)).
+> Check with `python3 --version`.
 
-# Full local mode (recommended): includes sentence-transformers embeddings
-pip3 install -e ".[local]"
+### From PyPI (recommended)
+
+The cleanest way to install a Python CLI is [pipx](https://pipx.pypa.io/), which
+gives you the `rag` command globally without touching your system Python:
+
+**Local mode** (free, private — embeddings and LLM run on your machine):
+
+```bash
+brew install pipx
+pipx install "ragcli[local]"
 ```
 
-After install, both the `rag` and `ragcli` commands are available globally from any directory.
+**Cloud mode** (OpenAI/Anthropic — no PyTorch download, much smaller install):
+
+```bash
+brew install pipx
+pipx install ragcli
+```
+
+Then choose `openai` or `anthropic` during `rag init` and add your API key
+(see [Getting API keys](#getting-api-keys)). The `[local]` extra is only
+needed for on-device embeddings; you can add it later with
+`pipx install --force "ragcli[local]"` if you switch.
+
+Prefer a virtual environment with plain pip? Same choice applies:
+
+```bash
+python3 -m venv ragcli-env
+source ragcli-env/bin/activate
+pip install "ragcli[local]"   # local mode — or:  pip install ragcli  (cloud mode)
+```
+
+### From source (for development)
+
+```bash
+git clone https://github.com/drew0716/ragcli.git
+cd ragcli
+make setup
+source .venv/bin/activate
+```
+
+`make setup` creates a project-local `.venv`, upgrades pip inside it, and
+installs ragcli in editable mode with the dev and local extras. Your system
+Python is never modified. If your default `python3` is older than 3.10, point
+it at a newer interpreter: `make setup PYTHON=python3.12`. Prefer doing it by
+hand?
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[local]"
+```
+
+The `pip install --upgrade pip` step matters: editable installs of this project
+need pip ≥ 21.3, and older Pythons bundle less.
+
+After install, both the `rag` and `ragcli` commands are available (globally
+with pipx; inside the activated environment otherwise).
 
 ### Optional extras
 
@@ -757,9 +811,30 @@ You changed the embedding model after indexing. Re-index:
 rag ingest --force
 ```
 
-### "pip: command not found" or installs to Python 2
+### "editable mode currently requires a setuptools-based build"
 
-Use `pip3` instead of `pip`.
+Your pip is too old (macOS system pip is 21.2 from 2021). Use a virtual
+environment and upgrade pip first:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[local]"
+```
+
+### "Package 'ragcli' requires a different Python: 3.9.x not in '>=3.10'"
+
+You're on the Python that ships with macOS. Install a current one:
+
+```bash
+brew install python        # then open a new terminal
+python3 --version          # should be 3.10+
+```
+
+### "Defaulting to user installation because normal site-packages is not writeable"
+
+You're installing into the system Python. Use pipx or a virtual environment
+(see [Installation](#installation)) — never `sudo pip`.
 
 ### Accidentally deleted a collection
 
@@ -793,14 +868,9 @@ Open Settings > API Keys and paste your key. It's saved to `.env` automatically.
 ```bash
 git clone https://github.com/drew0716/ragcli.git
 cd ragcli
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,local]"
-
-# Run tests (hermetic — no network or model downloads needed)
-pytest -q
-
-# Lint
-ruff check . --fix
+make setup          # creates .venv with dev + local extras
+make test           # hermetic — no network or model downloads needed
+make lint
 ```
 
 CI runs `ruff` + `pytest` on Python 3.10–3.13 for every PR. See

@@ -8,15 +8,17 @@ reports, docs, new vector stores/embedders/LLM providers, and fixes.
 ```bash
 git clone https://github.com/drew0716/ragcli.git
 cd ragcli
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,local]"
+make setup             # project-local .venv; never touches system Python
+source .venv/bin/activate
 ```
+
+Requires Python 3.10+ (`brew install python` on macOS — the stock 3.9 is too old).
 
 ## Running checks
 
 ```bash
-pytest -q              # tests (hermetic — no network or model downloads needed)
-ruff check . --fix     # lint
+make test              # tests (hermetic — no network or model downloads needed)
+make lint              # ruff with auto-fix
 ```
 
 Both must pass before a PR is merged; CI runs them on Python 3.10–3.13.
