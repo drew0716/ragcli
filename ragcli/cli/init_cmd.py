@@ -53,9 +53,11 @@ def init(
         config.llm.provider = "local"
         config.llm.model = "llama3.2"
 
-        # Check Ollama and pre-download embedding model
-        _check_ollama()
-        _predownload_embedding_model(config.embeddings.model)
+        # Check Ollama and pre-download embedding model.
+        # With --yes nothing is prompted, started, or downloaded.
+        _check_ollama(non_interactive=yes)
+        if not yes:
+            _predownload_embedding_model(config.embeddings.model)
 
     elif ai_mode == "openai":
         config.embeddings.provider = "openai"
@@ -92,7 +94,7 @@ def init(
     from ragcli.manifest.manager import ManifestManager
 
     manager = ManifestManager()
-    files = manager._scan_dir(docs_path)
+    files = manager.scan_dir(docs_path)
 
     if files:
         console.print(f"\n  Found [bold]{len(files)}[/] documents in {docs_dir} — indexing automatically...\n")
@@ -130,39 +132,39 @@ def init(
         ))
 
 
-def _check_ollama() -> None:
-    """Check if Ollama is installed and running. Install if missing."""
+def _check_ollama(non_interactive: bool = False) -> None:
+    """Check Ollama status. Never installs software — prints instructions instead."""
     import platform
     import shutil
 
     # Check if ollama binary exists
     if not shutil.which("ollama"):
+        install_hint = (
+            "  [bold]brew install ollama[/]" if platform.system() == "Darwin"
+            else "  Download from [bold]https://ollama.com/download[/]"
+        )
         console.print(Panel(
             "[yellow]Ollama is not installed[/]\n\n"
-            "Ollama is required for local AI mode (free, private, no API key).",
+            "Ollama is required for local AI mode (free, private, no API key).\n"
+            "Install it yourself, then re-run [bold]rag init[/]:\n\n"
+            + install_hint + "\n"
+            "  [dim]https://ollama.com/download[/]",
             title="[yellow]Ollama Not Found[/]",
             border_style="yellow",
         ))
-
-        if Confirm.ask("Install Ollama now?", default=True):
-            installed = _install_ollama(platform.system())
-            if not installed:
-                return
-        else:
-            console.print("  Install manually: [bold]https://ollama.com/download[/]")
-            return
+        return
 
     # Check if ollama is running
     if _ollama_is_running():
         console.print("  [green]✓[/] Ollama is running")
-        _ensure_model_pulled("llama3.2")
+        _ensure_model_pulled("llama3.2", non_interactive)
         return
 
-    # Ollama installed but not running — start it
+    # Ollama installed but not running — offer to start it
     console.print("  [yellow]Ollama is installed but not running[/]")
-    if Confirm.ask("Start Ollama now?", default=True):
+    if not non_interactive and Confirm.ask("Start Ollama now?", default=True):
         if _start_ollama():
-            _ensure_model_pulled("llama3.2")
+            _ensure_model_pulled("llama3.2", non_interactive)
             return
 
     console.print(Panel(
@@ -182,61 +184,6 @@ def _ollama_is_running() -> bool:
         return response.status_code == 200
     except Exception:
         return False
-
-
-def _install_ollama(system: str) -> bool:
-    """Install Ollama. Returns True if successful."""
-    import shutil
-    import subprocess
-
-    console.print()
-
-    if system == "Darwin":
-        # macOS: try brew first (most reliable), then curl
-        if shutil.which("brew"):
-            console.print("  Installing via Homebrew (this may take a few minutes)...")
-            result = subprocess.run(
-                ["brew", "install", "ollama"],
-                timeout=600,
-            )
-            if result.returncode == 0 and shutil.which("ollama"):
-                console.print("  [green]✓[/] Ollama installed successfully")
-                return True
-            console.print("  [yellow]Brew install failed, trying direct download...[/]")
-
-        # Fallback: download macOS binary directly
-        console.print("  Downloading Ollama for macOS...")
-        try:
-            result = subprocess.run(
-                ["bash", "-c",
-                 "curl -fsSL -o /tmp/ollama https://ollama.com/download/ollama-darwin "
-                 "&& chmod +x /tmp/ollama "
-                 "&& sudo mv /tmp/ollama /usr/local/bin/ollama"],
-                timeout=300,
-            )
-            if result.returncode == 0 and shutil.which("ollama"):
-                console.print("  [green]✓[/] Ollama installed successfully")
-                return True
-        except subprocess.TimeoutExpired:
-            pass
-
-    else:
-        # Linux: use the official install script
-        console.print("  Installing Ollama (this may take a few minutes)...")
-        try:
-            result = subprocess.run(
-                ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-                timeout=300,
-            )
-            if result.returncode == 0 and shutil.which("ollama"):
-                console.print("  [green]✓[/] Ollama installed successfully")
-                return True
-        except subprocess.TimeoutExpired:
-            pass
-
-    console.print("  [red]✗[/] Could not install Ollama automatically")
-    console.print("  Install manually: [bold]https://ollama.com/download[/]")
-    return False
 
 
 def _start_ollama() -> bool:
@@ -264,7 +211,7 @@ def _start_ollama() -> bool:
     return False
 
 
-def _ensure_model_pulled(model: str) -> None:
+def _ensure_model_pulled(model: str, non_interactive: bool = False) -> None:
     """Check if the LLM model is pulled, offer to pull if not."""
     import subprocess
 
@@ -282,6 +229,9 @@ def _ensure_model_pulled(model: str) -> None:
         pass
 
     console.print(f"  [yellow]Model {model} is not downloaded yet[/]")
+    if non_interactive:
+        console.print(f"  Run later: [bold]ollama pull {model}[/]")
+        return
     if Confirm.ask(f"Pull {model} now? (~2GB download)", default=True):
         console.print(f"  Pulling {model}... (this may take a few minutes)")
         try:
@@ -322,10 +272,17 @@ def _prompt_api_key(key_name: str, provider_name: str) -> None:
 def _predownload_embedding_model(model_name: str) -> None:
     """Pre-download the sentence-transformers embedding model during init."""
     console.print()
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError:
+        console.print(
+            "  [yellow]⚠[/] Local embeddings need the 'local' extra:\n"
+            '    [bold]pip install "ragcli[local]"[/]'
+        )
+        return
+
     with console.status(f"[bold blue]Downloading embedding model {model_name} (~80MB)..."):
         try:
-            from sentence_transformers import SentenceTransformer
-
             SentenceTransformer(model_name)
             console.print(f"  [green]✓[/] Embedding model {model_name} ready")
         except Exception as e:

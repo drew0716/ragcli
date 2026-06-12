@@ -55,7 +55,7 @@ def ingest(
 
     # Scan and show file summary
     manager = ManifestManager()
-    files = manager._scan_dir(docs_path)
+    files = manager.scan_dir(docs_path)
 
     if not files:
         console.print(Panel(
@@ -127,6 +127,13 @@ def ingest(
         f"{changes} changes  •  {result.duration_seconds}s",
         border_style="green",
     ))
+
+    if result.errors:
+        console.print(f"\n  [red]{len(result.errors)} file(s) had problems:[/]")
+        for err in result.errors[:10]:
+            console.print(f"    [red]✗[/] {Path(err.file).name}: {err.message}")
+        if len(result.errors) > 10:
+            console.print(f"    [dim]... and {len(result.errors) - 10} more[/]")
 
     # Show document summaries if generated
     if result.summaries:

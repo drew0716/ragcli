@@ -18,7 +18,6 @@ def query(
     top_k: int = typer.Option(5, "--top-k", help="Number of chunks to retrieve."),
     no_llm: bool = typer.Option(False, "--no-llm", help="Return raw chunks without LLM generation."),
     output_json: bool = typer.Option(False, "--json", help="Output as JSON."),
-    stream: bool = typer.Option(False, "--stream", help="Stream response token by token."),
     collection: Optional[str] = typer.Option(None, "--collection", help="Query a named collection."),
 ) -> None:
     """Ask a question about your documents."""
@@ -56,7 +55,8 @@ def _run_query(
             sources = pipeline.query_no_llm(question, top_k=top_k)
 
         if output_json:
-            console.print(json.dumps([s.model_dump() for s in sources], indent=2))
+            # Plain stdout so output is pipeable — Rich would wrap long lines.
+            typer.echo(json.dumps([s.model_dump() for s in sources], indent=2))
             return
 
         table = Table(title="Retrieved Chunks", show_header=True)
@@ -79,7 +79,7 @@ def _run_query(
         result = pipeline.query(question, top_k=top_k)
 
     if output_json:
-        console.print(json.dumps(result.model_dump(), indent=2))
+        typer.echo(json.dumps(result.model_dump(), indent=2))
         return
 
     # Display answer
@@ -185,7 +185,7 @@ def _auto_ingest_if_needed(config, pipeline) -> None:
         return
 
     manager = ManifestManager()
-    files = manager._scan_dir(docs_path)
+    files = manager.scan_dir(docs_path)
     if not files:
         return
 

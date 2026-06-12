@@ -8,24 +8,52 @@ from rich.panel import Panel
 
 console = Console()
 
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 def serve(
     port: int = typer.Option(8000, "--port", help="Port to listen on."),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to."),
-    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes."),
     no_watch: bool = typer.Option(False, "--no-watch", help="Disable auto-re-indexing on file changes."),
     cors: bool = typer.Option(False, "--cors", help="Enable CORS for all origins."),
     no_browser: bool = typer.Option(False, "--no-browser", help="Don't open browser automatically."),
+    allow_remote: bool = typer.Option(
+        False, "--allow-remote",
+        help="Required to bind a non-loopback host. The API has NO authentication.",
+    ),
 ) -> None:
     """Start the RAG API server with web UI."""
     import uvicorn
 
     from ragcli.core.config import RagConfig
 
+    if host not in LOOPBACK_HOSTS and not allow_remote:
+        console.print(Panel(
+            f"[red]Refusing to bind {host} without --allow-remote.[/]\n\n"
+            "The ragcli API has [bold]no authentication[/] — anyone who can reach the\n"
+            "port can read your documents, manage collections, and change settings.\n\n"
+            "If you really want network access, run:\n"
+            f"  [bold]rag serve --host {host} --allow-remote[/]\n\n"
+            "Better: keep it on 127.0.0.1 behind an authenticated reverse proxy\n"
+            "or a private network (e.g. Tailscale).",
+            title="[red]Remote binding blocked[/]",
+            border_style="red",
+        ))
+        raise typer.Exit(1)
+
+    if host not in LOOPBACK_HOSTS:
+        console.print(Panel(
+            f"[yellow]WARNING: serving without authentication on {host}:{port}.[/]\n"
+            "Anyone who can reach this port has full access to your documents\n"
+            "and settings.",
+            border_style="yellow",
+        ))
+
     config = RagConfig.load()
 
     # Auto-ingest on startup if there are un-indexed files
-    _auto_ingest(config)
+    if config.features.auto_ingest:
+        _auto_ingest(config)
 
     from ragcli.api.server import create_app
 
@@ -47,9 +75,10 @@ def serve(
     ))
     console.print("\n  Press Ctrl+C to stop\n")
 
-    # Start file watcher in background
-    if not no_watch:
-        _start_background_watcher(config)
+    # Start file watcher in background, sharing the app's pipeline so the
+    # watcher and the API never run two vector-store clients on the same data.
+    if not no_watch and config.features.watch_mode:
+        _start_background_watcher(config, app.state.pipeline)
 
     # Auto-open browser
     if not no_browser:
@@ -63,13 +92,7 @@ def serve(
 
         threading.Thread(target=_open_browser, daemon=True).start()
 
-    uvicorn.run(
-        app,
-        host=host,
-        port=port,
-        reload=reload,
-        log_level="info",
-    )
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def _auto_ingest(config) -> None:
@@ -80,7 +103,7 @@ def _auto_ingest(config) -> None:
     if not docs_path.exists():
         return
 
-    manager = ManifestManager()
+    manager = ManifestManager(collection=config.project.collection)
     manifest = manager.load()
     added, modified, deleted = manager.diff(docs_path, manifest)
 
@@ -109,8 +132,8 @@ def _auto_ingest(config) -> None:
     console.print(f"  [green]✓[/] Indexed {result.total_chunks} chunks ({result.duration_seconds}s)\n")
 
 
-def _start_background_watcher(config) -> None:
-    """Start a file watcher in a background thread."""
+def _start_background_watcher(config, pipeline) -> None:
+    """Start a file watcher in a background thread using the shared pipeline."""
     import threading
 
     docs_path = Path(config.project.docs_dir)
@@ -120,16 +143,12 @@ def _start_background_watcher(config) -> None:
     def _watch() -> None:
         from watchdog.observers import Observer
 
-        from ragcli.core.pipeline import RagPipeline
         from ragcli.watcher.handler import RagFileHandler
 
-        pipeline = RagPipeline(config=config)
         handler = RagFileHandler(pipeline=pipeline, docs_dir=docs_path, console=console)
         observer = Observer()
         observer.schedule(handler, str(docs_path), recursive=True)
         observer.start()
-        # Runs forever in background thread
         observer.join()
 
-    thread = threading.Thread(target=_watch, daemon=True)
-    thread.start()
+    threading.Thread(target=_watch, daemon=True).start()

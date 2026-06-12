@@ -23,21 +23,27 @@ def display_eval_report(scores: list[EvalScore], config: RagConfig) -> None:
 
     faith_threshold = config.eval.faithfulness_threshold
     rel_threshold = config.eval.relevancy_threshold
+    latency_threshold = config.eval.latency_threshold_ms
 
     below_threshold = 0
 
     for score in scores:
         faith_icon = _score_icon(score.faithfulness, faith_threshold)
         rel_icon = _score_icon(score.relevancy, rel_threshold)
+        lat_icon = "[green]✓[/]" if score.latency_ms <= latency_threshold else "[yellow]⚠[/]"
 
-        if score.faithfulness < faith_threshold or score.relevancy < rel_threshold:
+        if (
+            score.faithfulness < faith_threshold
+            or score.relevancy < rel_threshold
+            or score.latency_ms > latency_threshold
+        ):
             below_threshold += 1
 
         table.add_row(
             _truncate(score.question, 40),
             f"{faith_icon} {score.faithfulness:.2f}",
             f"{rel_icon} {score.relevancy:.2f}",
-            f"{score.latency_ms / 1000:.1f}s",
+            f"{lat_icon} {score.latency_ms / 1000:.1f}s",
         )
 
     console.print(table)

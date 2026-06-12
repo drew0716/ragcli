@@ -6,10 +6,23 @@ from rich.panel import Panel
 from rich.table import Table
 
 from ragcli import __version__
+from ragcli.core.errors import RagError
 
 console = Console()
 
-app = typer.Typer(
+
+class RagTyper(typer.Typer):
+    """Typer app that renders RagError as a clean message, not a traceback."""
+
+    def __call__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        try:
+            return super().__call__(*args, **kwargs)
+        except RagError as e:
+            console.print(f"\n[red]Error:[/] {e}\n")
+            raise SystemExit(1) from e
+
+
+app = RagTyper(
     name="rag",
     help="RAG-in-a-Box CLI — turn any folder into a queryable AI API.",
     no_args_is_help=False,
@@ -62,7 +75,7 @@ def _show_help() -> None:
     table.add_row("init", "Interactive project setup", "--yes")
     table.add_row("ingest", "Index documents into RAG", "--watch  --force  --dry-run  --clear")
     table.add_row("query", "Ask questions (or start REPL)", "--top-k  --no-llm  --json")
-    table.add_row("serve", "Start API server + web UI", "--port  --host  --cors  --watch")
+    table.add_row("serve", "Start API server + web UI", "--port  --no-watch  --cors  --no-browser")
     table.add_row("eval", "Evaluate RAG quality", "--auto  --dataset  --questions")
     table.add_row("status", "Show index stats", "")
     table.add_row("doctor", "Run diagnostics", "")

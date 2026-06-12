@@ -19,7 +19,6 @@ console = Console()
 def eval_cmd(
     auto: bool = typer.Option(False, "--auto", help="Auto-generate test questions."),
     dataset: Optional[str] = typer.Option(None, "--dataset", help="Path to JSON test questions."),
-    compare: Optional[str] = typer.Option(None, "--compare", help="Comma-separated config overrides for A/B."),
     questions: int = typer.Option(10, "--questions", help="Number of auto-generated questions."),
 ) -> None:
     """Evaluate RAG quality with faithfulness and relevancy scoring."""
@@ -47,14 +46,20 @@ def eval_cmd(
         console.print("[red]No questions to evaluate.[/]")
         raise typer.Exit(1)
 
-    scores = _run_evaluation(pipeline, test_questions)
+    scores, unscored = _run_evaluation(pipeline, test_questions)
     _display_results(scores, config)
+    if unscored:
+        console.print(
+            f"\n  [yellow]{unscored} question(s) could not be scored[/] — the judge "
+            "LLM did not return parseable JSON. They are excluded from the averages.\n"
+            "  A stronger judge model (Settings > LLM) usually fixes this."
+        )
     _save_results(scores)
 
 
 def _load_dataset(path: Path) -> list[str]:
     """Load test questions from a JSON file."""
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
         return [q if isinstance(q, str) else q.get("question", "") for q in data]
     return []
@@ -64,12 +69,12 @@ def _auto_generate_questions(pipeline, count: int) -> list[str]:
     """Generate test questions from indexed chunks."""
     import random
 
-    results = pipeline.store._collection.get(limit=min(count * 2, 100))
-    if not results["documents"]:
+    chunks = pipeline.store.get_all(limit=min(count * 2, 100))
+    if not chunks:
         console.print("[red]No documents indexed. Run 'rag ingest' first.[/]")
         return []
 
-    docs = results["documents"]
+    docs = [c.content for c in chunks]
     sampled = random.sample(docs, min(count, len(docs)))
     questions: list[str] = []
 
@@ -92,9 +97,16 @@ def _auto_generate_questions(pipeline, count: int) -> list[str]:
     return questions
 
 
-def _run_evaluation(pipeline, test_questions: list[str]) -> list[EvalScore]:
-    """Run each question through the pipeline and score results."""
+def _run_evaluation(pipeline, test_questions: list[str]) -> tuple[list[EvalScore], int]:
+    """Run each question through the pipeline and score results.
+
+    Returns (scores, unscored_count) — questions whose judge output couldn't
+    be parsed are counted, not given fake middle-of-the-road scores.
+    """
+    from ragcli.eval.metrics import score_with_llm
+
     scores: list[EvalScore] = []
+    unscored = 0
 
     with console.status("[bold blue]Running evaluation..."):
         for question in test_questions:
@@ -103,10 +115,15 @@ def _run_evaluation(pipeline, test_questions: list[str]) -> list[EvalScore]:
                 result = pipeline.query(question)
                 latency = (time.time() - start) * 1000
 
-                # Score with LLM-as-judge
-                faith, rel = _score_answer(pipeline, question, result.answer,
-                                           [s.content for s in result.sources])
+                judged = score_with_llm(
+                    pipeline.generator, question, result.answer,
+                    [s.content for s in result.sources],
+                )
+                if judged is None:
+                    unscored += 1
+                    continue
 
+                faith, rel = judged
                 scores.append(EvalScore(
                     faithfulness=faith,
                     relevancy=rel,
@@ -117,33 +134,7 @@ def _run_evaluation(pipeline, test_questions: list[str]) -> list[EvalScore]:
             except Exception as e:
                 console.print(f"  [red]Error evaluating:[/] {question[:50]}... — {e}")
 
-    return scores
-
-
-def _score_answer(
-    pipeline, question: str, answer: str, context_chunks: list[str]
-) -> tuple[float, float]:
-    """Use LLM-as-judge to score faithfulness and relevancy."""
-    context = "\n\n".join(context_chunks)
-    prompt = (
-        "Rate the following answer on a scale of 1-5 for FAITHFULNESS (does the answer "
-        "only use information from the provided context?) and RELEVANCY (does the answer "
-        "actually address the question?).\n\n"
-        f"Context: {context[:2000]}\n"
-        f"Question: {question}\n"
-        f"Answer: {answer}\n\n"
-        'Respond in JSON: {"faithfulness": <1-5>, "relevancy": <1-5>}'
-    )
-
-    try:
-        response, _ = pipeline.generator.generate(prompt)
-        # Try to parse JSON from response
-        data = json.loads(response.strip())
-        faith = max(0.0, min(1.0, (data.get("faithfulness", 3) - 1) / 4))
-        rel = max(0.0, min(1.0, (data.get("relevancy", 3) - 1) / 4))
-        return faith, rel
-    except (json.JSONDecodeError, KeyError):
-        return 0.5, 0.5
+    return scores, unscored
 
 
 def _display_results(scores: list[EvalScore], config: RagConfig) -> None:
